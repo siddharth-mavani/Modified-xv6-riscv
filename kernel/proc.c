@@ -486,6 +486,7 @@ scheduler(void)
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
+        p->n_runs += 1;
         c->proc = p;
         swtch(&c->context, &p->context);
 
@@ -531,6 +532,7 @@ scheduler(void)
     if(first_proc != 0){
       
       first_proc->state = RUNNING;
+      first_proc->n_runs += 1;
       c->proc = first_proc;
       swtch(&c->context, &first_proc->context);
 
@@ -823,10 +825,20 @@ procdump(void)
       state = "???";
 
 #if defined RR || defined FCFS 
-    printf("%d %s %s", p->pid, state, p->name);
+
+    int wait_time;
+
+    if(p->exit_time > 0){
+      wait_time = p->exit_time - p->create_time - p->total_run_time;
+    }
+    else{
+       wait_time = ticks - p->create_time - p->total_run_time;
+    }
+    printf("%d %s %d %d %d", p->pid, state, p->total_run_time, wait_time, p->n_runs);
+
 #endif
 
-// #ifdef PBS
+#ifdef PBS
 
     int wait_time;
 
@@ -838,7 +850,7 @@ procdump(void)
     }
 
     printf("%d %d %s %d %d %d", p->pid, p->priority, state, p->total_run_time, wait_time, p->n_runs);
-// #endif
+#endif
 
     printf("\n");
   }

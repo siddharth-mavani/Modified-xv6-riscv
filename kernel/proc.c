@@ -124,6 +124,8 @@ found:
   p->run_time = 0;
   p->start_time = 0;
   p->sleep_time = 0;
+  p->total_run_time = 0;
+  p->exit_time = 0;
   p->n_runs = 0;
   p->priority = 60;         // Default Priority is 60
 
@@ -379,6 +381,7 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  p->exit_time = ticks;
 
   release(&wait_lock);
 
@@ -561,7 +564,7 @@ scheduler(void)
 
       int nice;
 
-      if(p->n_runs > 0){
+      if(p->run_time + p->sleep_time > 0){
         nice = p->sleep_time * 10;
         nice = nice / (p->sleep_time + p->run_time);
       }
@@ -803,7 +806,7 @@ procdump(void)
   static char *states[] = {
   [UNUSED]    "unused",
   [SLEEPING]  "sleep ",
-  [RUNNABLE]  "runble",
+  [RUNNABLE]  "runnable",
   [RUNNING]   "run   ",
   [ZOMBIE]    "zombie"
   };
@@ -818,7 +821,25 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
+
+#if defined RR || defined FCFS 
     printf("%d %s %s", p->pid, state, p->name);
+#endif
+
+// #ifdef PBS
+
+    int wait_time;
+
+    if(p->exit_time > 0){
+      wait_time = p->exit_time - p->create_time - p->total_run_time;
+    }
+    else{
+       wait_time = ticks - p->create_time - p->total_run_time;
+    }
+
+    printf("%d %d %s %d %d %d", p->pid, p->priority, state, p->total_run_time, wait_time, p->n_runs);
+// #endif
+
     printf("\n");
   }
 }
@@ -834,6 +855,7 @@ update_time(void)
 
     if(p->state == RUNNING){
       p->run_time += 1;
+      p->total_run_time += 1;
     }
     else if(p->state == SLEEPING){
       p->sleep_time += 1;
@@ -844,7 +866,7 @@ update_time(void)
 }
 
 int
-set_priority(int new_priority, int pid)
+setpriority(int new_priority, int pid)
 {
   int prev_priority;
   prev_priority = 0;
@@ -859,12 +881,16 @@ set_priority(int new_priority, int pid)
       prev_priority = p->priority;
       p->priority = new_priority;
 
+      p->sleep_time = 0;
+      p->run_time = 0;
+
       int reschedule = 0;
 
-      if(new_priority > prev_priority){
+      if(new_priority < prev_priority){
         reschedule = 1;
       }
 
+      release(&p->lock);
       if(reschedule){
         yield();
       }

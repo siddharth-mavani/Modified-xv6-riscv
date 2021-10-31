@@ -114,7 +114,7 @@ sys_trace()
 }
 
 uint64
-sys_set_priority()
+sys_setpriority()
 {
   int pid, priority;
   int arg_num[2] = {0, 1};
@@ -128,5 +128,5 @@ sys_set_priority()
     return -1;
   }
    
-  return set_priority(priority, pid);
+  return setpriority(priority, pid);
 }

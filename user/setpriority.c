@@ -28,6 +28,6 @@ int main(int argc, char *argv[]){
         exit(1);
     }
 
-    set_priority(priority, pid);
+    setpriority(priority, pid);
     exit(1);
 }

@@ -112,3 +112,21 @@ sys_trace()
     return -1;
   }  
 }
+
+uint64
+sys_set_priority()
+{
+  int pid, priority;
+  int arg_num[2] = {0, 1};
+
+  if(argint(arg_num[0], &priority) < 0)
+  {
+    return -1;
+  }
+  if(argint(arg_num[1], &pid) < 0)
+  {
+    return -1;
+  }
+   
+  return set_priority(priority, pid);
+}

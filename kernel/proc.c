@@ -842,3 +842,36 @@ update_time(void)
     release(&p->lock);
   }
 }
+
+int
+set_priority(int new_priority, int pid)
+{
+  int prev_priority;
+  prev_priority = 0;
+
+  struct proc* p;
+  for(p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+
+    if(p->pid == pid)
+    {
+      prev_priority = p->priority;
+      p->priority = new_priority;
+
+      int reschedule = 0;
+
+      if(new_priority > prev_priority){
+        reschedule = 1;
+      }
+
+      if(reschedule){
+        yield();
+      }
+
+      break;
+    }
+    release(&p->lock);
+  }
+  return prev_priority;
+}

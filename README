@@ -1,3 +1,486 @@
+# Upgraded xv6-riscv
+
+# Introduction
+
+Xv6 is a teaching operating system developed in the summer of 2006 for MIT's operating systems course by the professors of MIT. The following addition features have been added to it:
+
+- strace system call
+- FCFS scheduling
+- PBS scheduling
+- setpriority system call
+- modified procdump system call
+
+# Requirements
+
+1. GCC compiler
+2. GNU make
+
+# Set-Up Instructions
+
+1. Clone the repository to your local system by executing the following command in your shell:
+
+```sh
+https://github.com/siddharth-mavani/xv6-riscv.git
+```
+2. cd into the cloned repository.
+
+```sh
+cd xv6-rsicv
+```
+
+# Running the OS
+
+- This OS has 3 different types of schedulers:
+    1. Round Robin (Default)
+    2. First Come First Serve
+    3. Priority Based Scheduling
+
+- To use Round Robin, execute `make qemu` or `make qemu SCHEDULER=RR` in the terminal.
+
+- To use First Come First Serve, execute `make qemu SCHEDULER=FCFS` in the terminal.
+
+- To use Priority Based Scheduling, execute `make qemu SCHEDULER=PBS` in the terminal.
+
+**NOTE:** Before switching to a different scheduler, run `make clean` in the terminal
+
+# strace
+
+- It intercepts and records the system calls which are called by a process during its execution.
+
+- It should take one argument, an integer mask, whose bits specify which system calls to trace.
+
+- syntax: 
+
+```
+strace <mask> <command> [args]
+```
+
+- Added a function `sys_trace()` in `kernel/sysproc.c`. This function retrieves the mask that is passed as an argument from user space to kernel space.
+
+```c
+uint64
+sys_trace()
+{
+  int mask;
+  int arg_num = 0;
+
+  if(argint(arg_num, &mask) >= 0)
+  {
+    myproc() -> mask = mask;
+    return 0;
+  }
+  else
+  {
+    return -1;
+  }  
+}
+```
+
+- Created the `strace.c` file in `user` and linked it to the `Makefile` as well. This file allows user to access the strace systme call.
+
+```c
+#include "../kernel/types.h"
+#include "../kernel/param.h"
+#include "../kernel/stat.h"
+#include "./user.h"
+
+int is_num(char s[])
+{
+    for(int i = 0; s[i] != '\0' ; i++)
+    {
+        if(s[i] < '0' || s[i] > '9')
+        {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+
+int main(int argc, char*argv[])
+{
+    char *nargv[MAXARG];
+
+    int check;
+    check = is_num(argv[1]);
+    
+    // checking for incorrect input
+    if(argc < 3 || check == 0)
+    {
+        fprintf(2, "Incorrect Input !\n");
+        fprintf(2, "Correct usage: strace <mask> <command>\n");
+        exit(1);
+    }
+
+    int temp, temp_num;
+    temp_num = atoi(argv[1]);
+    temp = trace(temp_num);
+
+    if(temp < 0)
+    {
+        fprintf(2, "strace: trace failed\n");
+    }
+
+    // copying the command
+    for(int i = 2; i < argc && i < MAXARG; i++)
+    {
+        nargv[i - 2] = argv[i];
+    }
+
+    exec(nargv[0], nargv);   // executing command
+
+    return 0;
+}
+```
+
+- Finally, modified the `syscall()` function in `kernel/syscall.c` to show details about each system call.
+
+```c
+void
+syscall(void)
+{
+  int num, num_args;
+  struct proc *p = myproc();
+
+  num = p->trapframe->a7;
+  num_args = syscall_num[num];
+  
+  int arr[num_args];
+  for(int i = 0; i < num_args ; i++){
+    arr[i] = argraw(i);
+  }
+
+  if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+    p->trapframe->a0 = syscalls[num]();
+    if((p -> mask >> num) & 1)
+    {
+      printf("%d: syscall %s (", p -> pid, syscall_names[num]);
+
+      for(int i = 0; i < syscall_num[num]; i++)
+      {
+        printf("%d ", arr[i]);
+      }
+
+      printf("\b");
+      printf(") -> %d", argraw(0));  
+      printf("\n");
+    }
+  } else {
+    printf("%d %s: unknown sys call %d\n",p->pid, p->name, num);
+    p->trapframe->a0 = -1;
+  }
+}
+```
+
+# FCFS
+
+- Added `create_time` as a parameter in `struct proc{}` which stores when a process was spawned. This is present in `kernel/proc.h`
+
+- Modified `Makefile` to include `SCHEDULER` as macro. Kept default as roundrobin.
+
+- Added the implementation of `FCFS` in the `scheduler()` function present in `kernel/proc.c`
+
+```c
+#ifdef FCFS
+
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+
+  for(;;){
+
+    intr_on();
+
+    struct proc* first_proc;
+    first_proc = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+        if(!first_proc || p->create_time < first_proc->create_time){
+          
+          if(first_proc != 0){
+            release(&first_proc->lock);
+          }
+
+          first_proc = p;
+          continue;
+        }
+      }
+      release(&p->lock);
+    }
+
+    if(first_proc != 0){
+      
+      first_proc->state = RUNNING;
+      c->proc = first_proc;
+      swtch(&c->context, &first_proc->context);
+
+      c->proc = 0;
+      release(&first_proc->lock);
+    }
+  }
+
+#endif
+```
+
+- Above code selects process which was spawned the earliest and runs it.
+
+- This is a `non-preemptive` scheduling algorithm, hence `yield()` functions are disabled in `trap.c`
+
+# PBS
+
+- Added `priority` as a parameter in `struct proc{}` which stores priority value of a process. This is present in `kernel/proc.h`
+
+- Priority depend on `niceness` which is calculated in the following manner:
+
+```
+niceness = Int( ticks spent in sleeping state * 10/ticks spent in (sleeping + running) state)
+```
+
+- The final priority, also called `Dynamic Priority` is calculated by:
+
+```
+DP = max(0, min(SP - niceness + 5, 0))
+```
+
+- Added the implementation of `PBS` in the `scheduler()` function present in `kernel/proc.c`
+
+```c
+#ifdef PBS
+
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+
+  for(;;){
+    // Avoid deadlock by ensuring that devices can interrupt.
+    intr_on();
+
+    struct proc* high_priority_proc;
+    high_priority_proc = 0;
+    int dynamic_priority = 101;     // Lower dynamic_priority value => higher preference in scheduling
+
+    for(p = proc; p < &proc[NPROC]; p++) {
+
+      acquire(&p->lock);
+
+      int nice;
+
+      if(p->run_time + p->sleep_time > 0){
+        nice = p->sleep_time * 10;
+        nice = nice / (p->sleep_time + p->run_time);
+      }
+      else{
+        nice = 5;               // Defualt value of nice;
+      }
+
+      int curr_dynamic_priority;
+      curr_dynamic_priority = max(0, min(p->priority - nice + 5, 100));
+
+      if(p->state == RUNNABLE){
+
+        int dp_check = 0;
+        int check_1 = 0, check_2 = 0;
+        
+        if(dynamic_priority == curr_dynamic_priority){
+          dp_check = 1;
+        }
+
+        // If 2 processes have same dynamic priority, we check for number of times the process has been scheduled
+        if(dp_check && p->n_runs < high_priority_proc->n_runs){
+          check_1 = 1;
+        }
+
+        // If 2 processes have same dynamic priority and number of runs
+        // we check for creation time
+        if(dp_check && high_priority_proc->n_runs == p->n_runs && p->create_time < high_priority_proc->create_time){
+          check_2 = 1;
+        }
+        
+        if(high_priority_proc == 0 || curr_dynamic_priority > dynamic_priority || (dp_check && check_1) || check_2){
+          
+          if(high_priority_proc != 0){
+            release(&high_priority_proc->lock);
+          }
+
+          dynamic_priority = curr_dynamic_priority;
+          high_priority_proc = p;
+          continue;
+
+        }
+      }
+      
+      release(&p->lock);
+
+    }
+
+    if(high_priority_proc != 0){
+
+      high_priority_proc->state = RUNNING;
+      high_priority_proc->start_time = ticks;
+      high_priority_proc->run_time = 0;
+      high_priority_proc->sleep_time = 0;
+      high_priority_proc->n_runs += 1;
+
+      c->proc = high_priority_proc;
+      swtch(&c->context, &high_priority_proc->context);
+
+      c->proc = 0;
+      release(&high_priority_proc->lock);
+
+    }
+  }
+
+#endif
+```
+
+# setpriority
+
+- This sytem call updates the priority of a system call based on its PID.
+
+- Added new parameters to help store information about processes.
+
+- Added a function `sys_setpriority()` in `kernel/sysproc.c`. This function retrieves the mask that is passed as an argument from user space to kernel space.
+
+```c
+uint64
+sys_setpriority()
+{
+  int pid, priority;
+  int arg_num[2] = {0, 1};
+
+  if(argint(arg_num[0], &priority) < 0)
+  {
+    return -1;
+  }
+  if(argint(arg_num[1], &pid) < 0)
+  {
+    return -1;
+  }
+   
+  return setpriority(priority, pid);
+}
+```
+
+- Created the `setpriority.c` file in `user` and linked it to the `Makefile` as well. This file allows user to access the strace systme call.
+
+```c
+#include "../kernel/types.h"
+#include "../kernel/param.h"
+#include "../kernel/stat.h"
+#include "./user.h"
+
+int check_priority_range(int priority){
+
+    if(priority >= 0 || priority <= 100){
+        return 1;
+    }
+    return 0;
+}
+
+int main(int argc, char *argv[]){
+    
+    if(argc < 3){
+        fprintf(2, "Incorrect Input !\n");
+        fprintf(2, "Correct usage: setpriority <priority> <pid>\n");
+        exit(1);
+    }
+
+    int priority = atoi(argv[1]);
+    int pid = atoi(argv[2]);
+
+    if(check_priority_range(priority) == 0){
+        fprintf(2, "Incorrect Range !\n");
+        fprintf(2, "Correct Range: [0,100]\n");
+        exit(1);
+    }
+
+    setpriority(priority, pid);
+    exit(1);
+}
+```
+
+# procdump 
+
+- Added `total_run_time` as a parameter in `struct proc{}` which stores total run time of a process. This is present in `kernel/proc.h` 
+
+- Added `end_time` as a parameter in `struct proc{}` which stores the time at which a process ends. This is present in `kernel/proc.h` 
+
+- Modified `procdump()` in `kernel/proc.c` to print more information about a process.
+
+```c
+void
+procdump(void)
+{
+  static char *states[] = {
+  [UNUSED]    "unused",
+  [SLEEPING]  "sleep ",
+  [RUNNABLE]  "runnable",
+  [RUNNING]   "run   ",
+  [ZOMBIE]    "zombie"
+  };
+  struct proc *p;
+  char *state;
+
+  printf("\n");
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state == UNUSED)
+      continue;
+    if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
+      state = states[p->state];
+    else
+      state = "???";
+
+#if defined RR || defined FCFS 
+
+    int wait_time;
+
+    if(p->exit_time > 0){
+      wait_time = p->exit_time - p->create_time - p->total_run_time;
+    }
+    else{
+       wait_time = ticks - p->create_time - p->total_run_time;
+    }
+    printf("%d %s %d %d %d", p->pid, state, p->total_run_time, wait_time, p->n_runs);
+
+#endif
+
+#ifdef PBS
+
+    int wait_time;
+
+    if(p->exit_time > 0){
+      wait_time = p->exit_time - p->create_time - p->total_run_time;
+    }
+    else{
+       wait_time = ticks - p->create_time - p->total_run_time;
+    }
+
+    printf("%d %d %s %d %d %d", p->pid, p->priority, state, p->total_run_time, wait_time, p->n_runs);
+#endif
+
+    printf("\n");
+  }
+}
+```
+
+# Analysis
+
+- used the `schedulertest` system call to find the average run time and wait time of a process in different scheduling algorithms.
+
+| Sched Algo | Run Time | Wait Time |
+|:-----------:|:------------:|:------:|
+| RR | 57 | 137 |
+| FCFS | 96 | 139 |
+| PBS | 59 | 123 |
+
+
+----
+
+# Original README
+
+
 xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
 Version 6 (v6).  xv6 loosely follows the structure and style of v6,
 but is implemented for a modern RISC-V multiprocessor using ANSI C.

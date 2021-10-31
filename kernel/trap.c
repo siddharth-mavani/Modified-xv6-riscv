@@ -76,8 +76,8 @@ usertrap(void)
   if(p->killed)
     exit(-1);
 
-// FCFS is non-preemptive
-#ifndef FCFS
+// FCFS & PBS are non-preemptive
+#if defined RR || defined MLFQ
 
   if(which_dev == 2)
     yield();
@@ -153,8 +153,8 @@ kerneltrap()
     panic("kerneltrap");
   }
 
-// FCFS is non-preemptive
-#ifndef FCFS
+// FCFS & PBS are non-preemptive
+#if defined RR || defined MLFQ
 
   if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
     yield();
@@ -172,6 +172,7 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
+  update_time();
   wakeup(&ticks);
   release(&tickslock);
 }

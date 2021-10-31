@@ -119,7 +119,13 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
-  p->ctime = ticks;
+
+  p->create_time = ticks;
+  p->run_time = 0;
+  p->start_time = 0;
+  p->sleep_time = 0;
+  p->n_runs = 0;
+  p->priority = 60;         // Default Priority is 60
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -430,6 +436,24 @@ wait(uint64 addr)
   }
 }
 
+int max(int a, int b){
+
+  if(a > b){
+    return a;
+  } 
+  return b;
+
+}
+
+int min(int a, int b){
+
+  if(a < b){
+    return a;
+  } 
+  return b;
+  
+}
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -440,6 +464,7 @@ wait(uint64 addr)
 void
 scheduler(void)
 {
+
 // If Scheduler is Round Robin
 #ifdef RR
 
@@ -487,7 +512,7 @@ scheduler(void)
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
-        if(!first_proc || p->ctime < first_proc->ctime){
+        if(!first_proc || p->create_time < first_proc->create_time){
           
           if(first_proc != 0){
             release(&first_proc->lock);
@@ -505,13 +530,106 @@ scheduler(void)
       first_proc->state = RUNNING;
       c->proc = first_proc;
       swtch(&c->context, &first_proc->context);
-      c->proc = 0;
 
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
       release(&first_proc->lock);
     }
   }
 
 #endif
+
+// If Scheduler is Priority-Based
+// #ifdef PBS
+
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+
+  for(;;){
+    // Avoid deadlock by ensuring that devices can interrupt.
+    intr_on();
+
+    struct proc* high_priority_proc;
+    high_priority_proc = 0;
+    int dynamic_priority = 101;     // Lower dynamic_priority value => higher preference in scheduling
+
+    for(p = proc; p < &proc[NPROC]; p++) {
+
+      acquire(&p->lock);
+
+      int nice;
+
+      if(p->n_runs > 0){
+        nice = p->sleep_time * 10;
+        nice = nice / (p->sleep_time + p->run_time);
+      }
+      else{
+        nice = 5;               // Defualt value of nice;
+      }
+
+      int curr_dynamic_priority;
+      curr_dynamic_priority = max(0, min(p->priority - nice + 5, 100));
+
+      if(p->state == RUNNABLE){
+
+        int dp_check = 0;
+        int check_1 = 0, check_2 = 0;
+        
+        if(dynamic_priority == curr_dynamic_priority){
+          dp_check = 1;
+        }
+
+        // If 2 processes have same dynamic priority, we check for number of times the process has been scheduled
+        if(dp_check && p->n_runs < high_priority_proc->n_runs){
+          check_1 = 1;
+        }
+
+        // If 2 processes have same dynamic priority and number of runs
+        // we check for creation time
+        if(dp_check && high_priority_proc->n_runs == p->n_runs && p->create_time < high_priority_proc->create_time){
+          check_2 = 1;
+        }
+        
+        if(high_priority_proc == 0 || curr_dynamic_priority > dynamic_priority || (dp_check && check_1) || check_2){
+          
+          if(high_priority_proc != 0){
+            release(&high_priority_proc->lock);
+          }
+
+          dynamic_priority = curr_dynamic_priority;
+          high_priority_proc = p;
+          continue;
+
+        }
+      }
+      
+      release(&p->lock);
+
+    }
+
+    if(high_priority_proc != 0){
+
+      high_priority_proc->state = RUNNING;
+      high_priority_proc->start_time = ticks;
+      high_priority_proc->run_time = 0;
+      high_priority_proc->sleep_time = 0;
+      high_priority_proc->n_runs += 1;
+
+      c->proc = high_priority_proc;
+      swtch(&c->context, &high_priority_proc->context);
+
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+      release(&high_priority_proc->lock);
+
+    }
+  }
+
+// #endif
+
 }
 
 // Switch to scheduler.  Must hold only p->lock
@@ -702,5 +820,25 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+
+void
+update_time(void)
+{
+  struct proc* p;
+  for(p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+
+    if(p->state == RUNNING){
+      p->run_time += 1;
+    }
+    else if(p->state == SLEEPING){
+      p->sleep_time += 1;
+    }
+
+    release(&p->lock);
   }
 }

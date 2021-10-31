@@ -107,5 +107,11 @@ struct proc {
   char name[16];               // Process name (debugging)
   int mask;                    // Tracing syscalls
 
-  int ctime;                   // Time when the process was created
+  uint64 create_time;          // Time when the process was created
+  uint64 run_time;             // Run-Time
+  uint64 wait_time;            // Wait-Time
+  uint64 start_time;           // Start-Time
+  uint64 sleep_time;           // Sleep-Time
+  uint64 n_runs;               // Number of times the process ran
+  uint64 priority;             // Priority of the Process;
 };

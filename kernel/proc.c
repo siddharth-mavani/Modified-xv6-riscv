@@ -541,7 +541,7 @@ scheduler(void)
 #endif
 
 // If Scheduler is Priority-Based
-// #ifdef PBS
+#ifdef PBS
 
   struct proc *p;
   struct cpu *c = mycpu();
@@ -628,7 +628,7 @@ scheduler(void)
     }
   }
 
-// #endif
+#endif
 
 }
 

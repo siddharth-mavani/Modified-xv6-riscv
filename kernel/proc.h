@@ -106,4 +106,6 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   int mask;                    // Tracing syscalls
+
+  int ctime;                   // Time when the process was created
 };

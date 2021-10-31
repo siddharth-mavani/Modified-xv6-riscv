@@ -119,6 +119,7 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->ctime = ticks;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -439,10 +440,13 @@ wait(uint64 addr)
 void
 scheduler(void)
 {
+// If Scheduler is Round Robin
+#ifdef RR
+
   struct proc *p;
   struct cpu *c = mycpu();
-  
   c->proc = 0;
+
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
@@ -464,6 +468,50 @@ scheduler(void)
       release(&p->lock);
     }
   }
+
+#endif
+
+// If Scheduler is First Come First Serve
+#ifdef FCFS
+
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+
+  for(;;){
+    // Avoid deadlock by ensuring that devices can interrupt.
+    intr_on();
+
+    struct proc* first_proc;
+    first_proc = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+        if(!first_proc || p->ctime < first_proc->ctime){
+          
+          if(first_proc != 0){
+            release(&first_proc->lock);
+          }
+
+          first_proc = p;
+          continue;
+        }
+      }
+      release(&p->lock);
+    }
+
+    if(first_proc != 0){
+      
+      first_proc->state = RUNNING;
+      c->proc = first_proc;
+      swtch(&c->context, &first_proc->context);
+      c->proc = 0;
+
+      release(&first_proc->lock);
+    }
+  }
+
+#endif
 }
 
 // Switch to scheduler.  Must hold only p->lock

@@ -37,4 +37,5 @@ entry("sbrk");
 entry("sleep");
 entry("uptime");
 entry("trace");
-entry("setpriority")
+entry("setpriority");
+entry("waitx");

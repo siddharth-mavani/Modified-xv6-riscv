@@ -2,7 +2,7 @@
 
 # Introduction
 
-Xv6 is a teaching operating system developed in the summer of 2006 for MIT's operating systems course by the professors of MIT. The following addition features have been added to it:
+xv6-riscv is a teaching operating system developed in the summer of 2006 for MIT's operating systems course by the professors of MIT. The following addition features have been added to it:
 
 - [strace system call](#strace)
 - [FCFS scheduling](#fcfs)

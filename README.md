@@ -4,16 +4,20 @@
 
 Xv6 is a teaching operating system developed in the summer of 2006 for MIT's operating systems course by the professors of MIT. The following addition features have been added to it:
 
-- strace system call
-- FCFS scheduling
-- PBS scheduling
-- setpriority system call
-- modified procdump system call
+- [strace system call](#strace)
+- [FCFS scheduling](#fcfs)
+- [PBS scheduling](#pbs)
+- [setpriority system call](#setpriority)
+- [modified procdump system call](#procdump )
+
+----
 
 # Requirements
 
 1. GCC compiler
 2. GNU make
+
+----
 
 # Set-Up Instructions
 
@@ -27,6 +31,8 @@ https://github.com/siddharth-mavani/xv6-riscv.git
 ```sh
 cd xv6-rsicv
 ```
+
+----
 
 # Running the OS
 
@@ -43,19 +49,35 @@ cd xv6-rsicv
 
 **NOTE:** Before switching to a different scheduler, run `make clean` in the terminal
 
+----
+
 # strace
 
-- It intercepts and records the system calls which are called by a process during its execution.
+It intercepts and records the system calls which are called by a process during its execution.
 
-- It should take one argument, an integer mask, whose bits specify which system calls to trace.
+It should take one argument, an integer mask, whose bits specify which system calls to trace.
 
-- syntax: 
+syntax: 
 
 ```
 strace <mask> <command> [args]
 ```
 
-- Added a function `sys_trace()` in `kernel/sysproc.c`. This function retrieves the mask that is passed as an argument from user space to kernel space.
+```
+- mask: a bit mask of the system calls to trace.
+- command: the command to execute.
+- args: the arguments to the command.
+```
+
+1. Added `$U/_strace` to the `UPROGS` in the Makefile.
+
+2. Added a variable `mask` in `kernel/proc.h` and initialized it in the `fork()` function in `kernel/proc.c` to make a copy of the trace mask from the parent to the child process.
+
+```c
+np->mask = p->mask;
+```
+
+3. Added a function `sys_trace()` in `kernel/sysproc.c`. This function retrieves the mask that is passed as an argument from user space to kernel space.
 
 ```c
 uint64
@@ -76,7 +98,7 @@ sys_trace()
 }
 ```
 
-- Created the `strace.c` file in `user` and linked it to the `Makefile` as well. This file allows user to access the strace systme call.
+4. Created the `strace.c` file in the `user` directory to generate the user-space stubs for the system call. This file allows user to access the strace systme call.
 
 ```c
 #include "../kernel/types.h"
@@ -134,7 +156,7 @@ int main(int argc, char*argv[])
 }
 ```
 
-- Finally, modified the `syscall()` function in `kernel/syscall.c` to show details about each system call.
+5. Modified the `syscall()` function in `kernel/syscall.c` to show details about each system call. Also added `syscall_names` and `syscall_num` arrays in the same file to help with this.
 
 ```c
 void
@@ -173,13 +195,35 @@ syscall(void)
 }
 ```
 
+6. Added a new stub to `user/usys.pl`, which makes the Makefile invoke the script `user/usys.pl` and produce `user/usys.S`, and a syscall number to `kernel/syscall.h.`
+
+----
+
 # FCFS
 
-- Added `create_time` as a parameter in `struct proc{}` which stores when a process was spawned. This is present in `kernel/proc.h`
+First Come First Serve (FCFS) is a scheduling algorithm that automatically executes queued requests and processes `in order of their arrival`. It is the easiest and simplest CPU scheduling algorithm. In this type of algorithm, processes which requests the CPU first get the CPU allocation first. This is a `non-preemptive` algorithm.
 
-- Modified `Makefile` to include `SCHEDULER` as macro. Kept default as roundrobin.
+1. Modified the `Makefile` to support `SCHEDULER` macro for the compilation of the specified scheduling algorithm.
 
-- Added the implementation of `FCFS` in the `scheduler()` function present in `kernel/proc.c`
+```
+ifndef SCHEDULER
+SCHEDULER := RR
+endif
+```
+
+```
+CFLAGS += -D $(SCHEDULER)
+```
+
+2. Added `create_time` as a parameter in `struct proc` which stores when a process was spawned. This is present in `kernel/proc.h`
+
+3. Initialised `create_time` to `ticks` in `allocproc()` function in `kernel/proc.c`
+
+```c
+p->create_time = ticks;
+```
+
+4. Added the implementation of `FCFS` in the `scheduler()` function present in `kernel/proc.c`
 
 ```c
 #ifdef FCFS
@@ -224,27 +268,67 @@ syscall(void)
 #endif
 ```
 
-- Above code selects process which was spawned the earliest and runs it.
+5. Disabled `yield()` function in `kernel/trap.c` to prevent preemption using macros.
 
-- This is a `non-preemptive` scheduling algorithm, hence `yield()` functions are disabled in `trap.c`
+```c
+// FCFS & PBS are non-preemptive
+#if defined RR || defined MLFQ
+  if(which_dev == 2)
+    yield();  
+#endif
+```
+
+```c
+// FCFS & PBS are non-preemptive
+#if defined RR || defined MLFQ
+  if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
+    yield();
+#endif
+```
+
+----
 
 # PBS
 
-- Added `priority` as a parameter in `struct proc{}` which stores priority value of a process. This is present in `kernel/proc.h`
+Priority Based Scheduling (PBS) is a scheduling algorithm that executes queued requests and processes `based on priority`. This is a `non-preemptive` algorithm.
 
-- Priority depend on `niceness` which is calculated in the following manner:
+Priority depends on `niceness` and `Static Priority(SP)`.
+
+`Static Priority(SP)` can be in the range `[0,100]`. The `defualt value` is `60`. Lower the value, higher the priority. This can be modified using `setpriority` system call.
+
+`niceness` can be in the range `[0,10]`. This measuers the percentage of time the process was sleeping. This is calculated in the following manner:
 
 ```
 niceness = Int( ticks spent in sleeping state * 10/ticks spent in (sleeping + running) state)
 ```
 
-- The final priority, also called `Dynamic Priority` is calculated by:
+The final priority, also called `Dynamic Priority(DP)` is calculated by:
 
 ```
 DP = max(0, min(SP - niceness + 5, 0))
 ```
 
-- Added the implementation of `PBS` in the `scheduler()` function present in `kernel/proc.c`
+1. Added variables `run_time`, `start_time`, `sleep_time`, `n_runs`, and `priority` to `struct proc` in `kernel/proc.h`
+
+```c
+uint64 run_time;             // Run-Time
+uint64 start_time;           // Start-Time
+uint64 sleep_time;           // Sleep-Time
+uint64 n_runs;               // Number of times the process ran
+uint64 priority;             // Priority of the Process;
+```
+
+2. Initialised the above variables in `allocproc() ` function in `kernel/proc.c`
+
+```c
+p->run_time = 0;
+p->start_time = 0;
+p->sleep_time = 0;
+p->n_runs = 0;
+p->priority = 60;         // Default Priority is 60
+```
+
+3. Added the implementation of `PBS` in the `scheduler()` function present in `kernel/proc.c`
 
 ```c
 #ifdef PBS
@@ -335,13 +419,23 @@ DP = max(0, min(SP - niceness + 5, 0))
 #endif
 ```
 
+----
+
 # setpriority
 
-- This sytem call updates the priority of a system call based on its PID.
+This sytem call `updates` the `Static Priority` of a system call based on its `PID`
 
-- Added new parameters to help store information about processes.
+syntax:
 
-- Added a function `sys_setpriority()` in `kernel/sysproc.c`. This function retrieves the mask that is passed as an argument from user space to kernel space.
+```c
+setpriority <priority> <pid>
+```
+
+This system call `returns` the `old Static Priority` of the process.
+
+1. Added `$U/_setpriority` to the `UPROGS` in the Makefile.
+
+2. Added a function `sys_setpriority()` in `kernel/sysproc.c`. This function retrieves the pid and priority that is passed as an argument from user space to kernel space.
 
 ```c
 uint64
@@ -363,7 +457,7 @@ sys_setpriority()
 }
 ```
 
-- Created the `setpriority.c` file in `user` and linked it to the `Makefile` as well. This file allows user to access the strace systme call.
+3. Created the `setpriority.c` file in the `user` directory to generate the user-space stubs for the system call. This file allows user to access the setpriority system call.
 
 ```c
 #include "../kernel/types.h"
@@ -401,13 +495,75 @@ int main(int argc, char *argv[]){
 }
 ```
 
+4. Added a new function `setpriority()` in `kernel/proc.c`
+
+```c
+int
+setpriority(int new_priority, int pid)
+{
+  int prev_priority;
+  prev_priority = 0;
+
+  struct proc* p;
+  for(p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+
+    if(p->pid == pid)
+    {
+      prev_priority = p->priority;
+      p->priority = new_priority;
+
+      p->sleep_time = 0;
+      p->run_time = 0;
+
+      int reschedule = 0;
+
+      if(new_priority < prev_priority){
+        reschedule = 1;
+      }
+
+      release(&p->lock);
+      if(reschedule){
+        yield();
+      }
+
+      break;
+    }
+    release(&p->lock);
+  }
+  return prev_priority;
+}
+```
+
+5. Added a new stub to `user/usys.pl`, which makes the Makefile invoke the script `user/usys.pl` and produce `user/usys.S`, and a syscall number to `kernel/syscall.h.`
+
+----
+
 # procdump 
 
-- Added `total_run_time` as a parameter in `struct proc{}` which stores total run time of a process. This is present in `kernel/proc.h` 
+1. Added new attributes `total_run_time`, `wait_time` and `exit_time` in `struct proc` in `kernel/proc.h`.
 
-- Added `end_time` as a parameter in `struct proc{}` which stores the time at which a process ends. This is present in `kernel/proc.h` 
+```c
+uint64 total_run_time;       // Total Run-Time
+uint64 wait_time;            // Wait-Time
+uint64 exit_time;            // Exit-Time
+```
 
-- Modified `procdump()` in `kernel/proc.c` to print more information about a process.
+2.  Initialised the above variables in `allocproc() ` function in `kernel/proc.c`
+
+```c
+p->total_run_time = 0;
+p->exit_time = 0;
+```
+
+3. `exit_time` is set to `ticks` in `exit()` function in `kernel/proc.c` once it becomes a `zombie process`
+
+```c
+p->exit_time = ticks;
+```
+
+4. Modified `procdump()` in `kernel/proc.c` to print more information about a process.
 
 ```c
 void
@@ -465,16 +621,17 @@ procdump(void)
 }
 ```
 
+----
+
 # Analysis
 
 - used the `schedulertest` system call to find the average run time and wait time of a process in different scheduling algorithms.
 
-| Sched Algo | Run Time | Wait Time |
+| Scheduling Algorithm | Run Time | Wait Time |
 |:-----------:|:------------:|:------:|
-| RR | 57 | 137 |
-| FCFS | 96 | 139 |
-| PBS | 59 | 123 |
-
+| Round Robin (RR) | 57 | 137 |
+| First Come First Serve (FCFS) | 96 | 139 |
+| Priority Based Scheduling (PBS) | 59 | 123 |
 
 ----
 

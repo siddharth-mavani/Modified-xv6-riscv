@@ -1,4 +1,4 @@
-# Upgraded xv6-riscv
+# Modified xv6-riscv
 
 # Introduction
 

@@ -24,7 +24,7 @@ xv6-riscv is a teaching operating system developed in the summer of 2006 for MIT
 1. Clone the repository to your local system by executing the following command in your shell:
 
 ```sh
-https://github.com/siddharth-mavani/xv6-riscv.git
+https://github.com/siddharth-mavani/Modified-xv6-riscv
 ```
 2. cd into the cloned repository.
 
